@@ -42,6 +42,10 @@ short_description: AI Digital Twin of India's Climate - ISRO BAH 2026 (PS#5)
 
 </div>
 
+![VARUNA dashboard — AI Digital Twin of India's Climate](assets/ui-1.png)
+
+<div align="center"><sub>VARUNA dashboard — national AI forecast over India, rendered live from real IMD + INSAT data.</sub></div>
+
 ---
 
 > **VARUNA** is a dynamic, high‑fidelity virtual replica of India's climate system. It continuously
@@ -50,6 +54,16 @@ short_description: AI Digital Twin of India's Climate - ISRO BAH 2026 (PS#5)
 > assimilation**, and lets a planner run **what‑if** scenarios whose impacts on **urban heat** and
 > **air quality** are seen live on an interactive map. *Named after Varuṇa — the Vedic deity of the
 > sky, waters and cosmic order.*
+
+### Why VARUNA matters
+India's monsoon, heatwaves and droughts directly shape the lives of 1.4 billion people, yet
+actionable climate intelligence is fragmented across agencies and formats. VARUNA unifies the
+nation's own datasets into **one living, queryable twin** — *observe → forecast → assimilate →
+simulate* — so a planner can see today's climate state, a 10‑day outlook, the emerging hazards,
+and the downstream effect of an intervention **before spending a single rupee**. It is built to be
+**Atmanirbhar** (self‑reliant): every byte of data and every model weight is Indian and on‑device.
+
+> 🔗 **Repository:** https://github.com/Aditya060806/VARUNA · **Deploy:** Hugging Face Spaces (Streamlit) — config‑ready.
 
 ---
 
@@ -90,6 +104,19 @@ short_description: AI Digital Twin of India's Climate - ISRO BAH 2026 (PS#5)
 | 🛰️ | **Optimal‑Interpolation assimilation** — model state fused with observations (beyond naive nudging). |
 | 🗺️ | **Interactive dashboard** — six views, dark "orbital" theme, instant client‑side maps. |
 | ♻️ | **Fully reproducible** — `prepare → train → evaluate → serve`, all in one repo on a single GPU. |
+
+### 📌 At a Glance
+
+| | |
+|---|---|
+| **Domain** | All‑India, 0.25° grid (129 × 135), 4,964 land cells |
+| **Data span** | 1981–2024 · **16,071 daily fields** · 3 IMD variables + INSAT‑3DR LST |
+| **Model** | ClimateUNet — **7.42 M** params, residual U‑Net + attention, 10‑day direct horizon |
+| **Trained on** | NVIDIA RTX 4050 (6 GB), PyTorch + CUDA, mixed precision |
+| **Day‑1 accuracy** | Tmax **MAE 0.82 °C**, Tmin **0.59 °C**, Rain **3.16 mm** · ACC **0.76** |
+| **Skill** | Beats persistence by **6–28 %**; beats persistence‑of‑anomaly on temperature |
+| **Synthetic data** | **None** — 100 % real national datasets |
+| **Deploy** | Streamlit · Hugging Face Spaces ready |
 
 ---
 
@@ -389,6 +416,26 @@ boundaries, smooth slider interaction (heavy panels isolated with `st.fragment`)
 **Controls:** region (national / pilot), climate layer (rain / tmax / tmin), **date picker (1981 → 2026)**,
 forecast lead day (1–10). Dates beyond IMD data render an explicitly‑labelled **climatological projection**
 that the what‑if scenarios then modify (e.g., *"summer 2026 under +2 °C"*).
+
+### 🖼️ Dashboard Gallery
+
+<table>
+<tr>
+<td width="50%"><img src="assets/ui-1.png" alt="Climate Twin"/><br/><sub><b>Climate Twin</b> — national AI forecast map over India.</sub></td>
+<td width="50%"><img src="assets/ui-3.png" alt="Forecast evolution"/><br/><sub><b>Forecast evolution</b> — 10‑day region‑mean vs climatology.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="assets/ui-4.png" alt="Hazards"/><br/><sub><b>Hazards & Extremes</b> — heatwave / heavy‑rain / dry‑spell.</sub></td>
+<td width="50%"><img src="assets/ui-5.png" alt="What-if simulator"/><br/><sub><b>What‑if Simulator</b> — live heat‑stress & AQI impact.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="assets/ui-7.png" alt="Validation & skill"/><br/><sub><b>Validation & Skill</b> — RMSE / ACC / skill curves.</sub></td>
+<td width="50%"><img src="assets/ui-6.png" alt="Satellite layer"/><br/><sub><b>Satellite (INSAT)</b> — real INSAT‑3DR LST layer.</sub></td>
+</tr>
+<tr>
+<td colspan="2"><img src="assets/ui-2.png" alt="Twin controls"/><br/><sub><b>Twin controls</b> — region, layer, date picker (1981→2026), lead day, scenario levers.</sub></td>
+</tr>
+</table>
 
 ---
 
