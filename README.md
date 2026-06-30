@@ -38,8 +38,8 @@
 > sky, waters and cosmic order.*
 
 ### Why VARUNA matters
-India's monsoon, heatwaves and droughts directly shape the lives of 1.4 billion people, yet
-actionable climate intelligence is fragmented across agencies and formats. VARUNA unifies the
+India's monsoon, heatwaves and droughts directly shape the lives of over 1.4 billion people, yet
+actionable climate intelligence remains fragmented across agencies and formats. VARUNA unifies the
 nation's own datasets into **one living, queryable twin** — *observe → forecast → assimilate →
 simulate* — so a planner can see today's climate state, a 10‑day outlook, the emerging hazards,
 and the downstream effect of an intervention **before spending a single rupee**. It is built to be
@@ -243,7 +243,7 @@ Implemented in `data/` — robust, cached, reproducible:
 
 ## The AI Model — ClimateUNet
 
-A modern, fully‑convolutional spatiotemporal forecaster designed for **stability** and **skill**.
+A modern, fully‑convolutional spatiotemporal forecaster engineered for **stability** and **skill**.
 
 ### Design principles
 - **Anomaly forecasting** — predicts deviations from climatology, not raw fields → rollouts relax toward climate instead of diverging.
@@ -573,6 +573,7 @@ streamlit run app.py              # launch VARUNA
 ```
 
 Every stage is self‑contained — **no pre‑baked artefacts, no synthetic fallback.**
+Each script can also be run independently, so you can reproduce any single stage in isolation.
 
 ### Continuous integration
 
