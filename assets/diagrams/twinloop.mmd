@@ -1,0 +1,8 @@
+flowchart LR
+    O["<b>①  Observe</b><br/>IMD + INSAT<br/>real data"] --> F["<b>②  Forecast</b><br/>ClimateUNet<br/>10 days"]
+    A["<b>③  Assimilate</b><br/>Optimal<br/>Interpolation"] --> H["<b>④  Act</b><br/>Hazards · What-if<br/>Heat & AQI"]
+    F --> A
+    H -. "new data arrives" .-> O
+
+    classDef step fill:#0d1530,stroke:#FF7B00,color:#ffffff,stroke-width:3px;
+    class O,F,A,H step;

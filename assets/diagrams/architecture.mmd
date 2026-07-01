@@ -1,0 +1,18 @@
+flowchart LR
+    S1["🛰️ <b>National Data</b><br/>━━━━━━━<br/>IMD Rainfall 0.25°<br/>IMD Temp max / min<br/>INSAT-3DR LST"]
+    S2["⚙️ <b>Pre-processing</b><br/>━━━━━━━<br/>Regrid → 0.25° grid<br/>Climatology (train yrs)<br/>Anomaly cube + mask"]
+    S3["🧠 <b>AI Core</b><br/>━━━━━━━<br/>ClimateUNet 7.42M<br/>XGBoost ensemble<br/>3 baselines"]
+    S4["🌍 <b>Digital Twin</b><br/>━━━━━━━<br/>10-day forecast<br/>OI assimilation<br/>Hazard analytics"]
+    S5["📊 <b>Applications</b><br/>━━━━━━━<br/>Climate Twin map<br/>What-if: Heat & AQI<br/>Validation & Skill"]
+    S1 --> S2 --> S3 --> S4 --> S5
+
+    classDef src  fill:#1E5BFF,stroke:#04070f,color:#ffffff,stroke-width:2px;
+    classDef pre  fill:#7E57C2,stroke:#04070f,color:#ffffff,stroke-width:2px;
+    classDef ai   fill:#FF7B00,stroke:#04070f,color:#ffffff,stroke-width:2px;
+    classDef twin fill:#0EA5A0,stroke:#04070f,color:#ffffff,stroke-width:2px;
+    classDef app  fill:#0891B2,stroke:#04070f,color:#ffffff,stroke-width:2px;
+    class S1 src;
+    class S2 pre;
+    class S3 ai;
+    class S4 twin;
+    class S5 app;
