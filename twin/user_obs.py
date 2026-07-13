@@ -96,6 +96,22 @@ def build_history(cube, dates, start_ts):
     return hist, n_real
 
 
+def build_driver_history(dcube, dates, start_ts, n_drivers):
+    """(INPUT_DAYS,H,W,K) driver anomalies ending the day before start_ts.
+
+    Mirrors build_history: real driver analyses inside the archive, zero
+    anomaly (climatological drivers) beyond it.
+    """
+    H, W = dcube.shape[1], dcube.shape[2]
+    out = np.zeros((C.INPUT_DAYS, H, W, n_drivers), dtype="float32")
+    for k in range(C.INPUT_DAYS):
+        d = pd.Timestamp(start_ts) - pd.Timedelta(days=C.INPUT_DAYS - k)
+        if dates[0] <= d <= dates[-1]:
+            ti = int(np.argmin(np.abs(dates.values - np.datetime64(d))))
+            out[k] = np.asarray(dcube[ti], dtype="float32")
+    return out
+
+
 def inject_observations(hist, start_ts, user_df, carr, std, iy, ix,
                         length_scale=2.0, sigma_o=0.5):
     """OI-assimilate user observations into the history window (in place).

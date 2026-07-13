@@ -5,6 +5,11 @@ Inference for ClimateUNet: anomalies -> real-world fields.
     field[v, lead] = clim[v, doy(forecast_day)] + pred_anom_scaled[v,lead]*std[v]
     rain is clipped to >= 0.
 
+v2 checkpoints (climate_unet_v2.pt) carry synoptic driver channels (MSLP,
+u850, v850, precipitable water); the Forecaster reads the checkpoint config
+and consumes the driver cube transparently — all call signatures stay the
+same as v1.
+
 Physical-consistency layer (applied at reconstruction):
   * rain >= 0                      (mass non-negativity)
   * tmax >= tmin + 0.1 degC        (thermodynamic ordering of the diurnal cycle)
@@ -14,10 +19,9 @@ a transparent diagnostic, not a silent patch.
 Also provides:
   * predict_window   — forecast from an explicit history window (BYOO /
                        user-assimilated states, days beyond the archive)
-  * predict_ensemble — MC-dropout ensemble: the bottleneck dropout is kept
-                       stochastic at inference and N members are drawn, giving
-                       a per-cell forecast spread (uncertainty source #1; the
-                       CNN-vs-XGBoost disagreement is source #2).
+  * predict_ensemble — perturbed ensemble: initial-condition noise within
+                       analysis error (propagated through the POA prior, as in
+                       IMD NEPS / NCEP GEFS design) + stochastic MC-dropout.
 
 Returns forecasts in real units (mm/day, deg C) on the national grid.
 """
@@ -38,17 +42,37 @@ from models import dataset as D  # noqa: E402
 DTR_MIN = 0.1        # enforced minimum diurnal range (degC)
 
 
+def default_checkpoint():
+    """Prefer the driver-aware v2 checkpoint when it exists (or $VARUNA_CKPT)."""
+    env = os.environ.get("VARUNA_CKPT")
+    if env and os.path.exists(env):
+        return env
+    v2 = os.path.join(C.CKPT_DIR, "climate_unet_v2.pt")
+    return v2 if os.path.exists(v2) else os.path.join(C.CKPT_DIR, "climate_unet.pt")
+
+
 class Forecaster:
-    def __init__(self, ckpt=None, device=None):
+    def __init__(self, ckpt=None, device=None, dcube=None):
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-        self.model = build_model().to(self.device).eval()
-        ckpt = ckpt or os.path.join(C.CKPT_DIR, "climate_unet.pt")
+        ckpt = ckpt or default_checkpoint()
         state = torch.load(ckpt, map_location=self.device, weights_only=False)
+        cfg = state.get("config", {})
+        self.n_drivers = int(cfg.get("n_drivers", 0))
+        self.drivers = cfg.get("drivers", [])
+        self.model = build_model(n_drivers=self.n_drivers).to(self.device).eval()
         self.model.load_state_dict(state["state_dict"])
+        self.ckpt_name = os.path.basename(ckpt)
+        self.dcube = dcube                       # (T,H,W,K) mmap, set by loader
+        if self.n_drivers and dcube is None:
+            from data import drivers as DRV
+            self.dcube, _ = DRV.load_cube()
+        if self.n_drivers and self.dcube is None:
+            raise RuntimeError(f"{self.ckpt_name} needs the driver cube — "
+                               "run `python data/drivers.py` first.")
 
     @torch.no_grad()
     def _infer(self, X):
-        """X (51,H,W) -> scaled-anomaly output (HORIZON,3,H,W)."""
+        """X (in_ch,H,W) -> scaled-anomaly output (HORIZON,3,H,W)."""
         xb = torch.from_numpy(X[None]).to(self.device)
         with torch.autocast(device_type=self.device.type, enabled=(self.device.type == "cuda")):
             out = self.model(xb)[0].float().cpu().numpy()
@@ -78,21 +102,28 @@ class Forecaster:
 
         Returns dict: frames {var: (HORIZON,H,W) real units}, dates, physics.
         """
-        X, _ = D._window(cube, t)                       # (INPUT_DAYS*3,H,W)
+        X, _ = D._window(cube, t, self.dcube if self.n_drivers else None)
         out = self._infer(X)
         return self._reconstruct(out, dates[t], carr, std)
 
     @torch.no_grad()
-    def predict_window(self, hist, start_ts, carr, std):
+    def predict_window(self, hist, start_ts, carr, std, drv_hist=None):
         """Forecast from an explicit scaled-anomaly history (INPUT_DAYS,H,W,3).
 
         Used by the BYOO path: the history may be user-assimilated and may
-        extend beyond the IMD archive (climatology background).
+        extend beyond the IMD archive (climatology background). For driver
+        checkpoints, `drv_hist` (INPUT_DAYS,H,W,K) is used when given, else a
+        zero-anomaly (climatological) driver background.
         """
         H, W = hist.shape[1], hist.shape[2]
-        hist_ch = np.transpose(hist, (0, 3, 1, 2)).reshape(C.INPUT_DAYS * 3, H, W)
-        poa = D._poa_channels(hist[-1])
-        X = np.concatenate([hist_ch, poa], axis=0).astype("float32")
+        parts = [np.transpose(hist, (0, 3, 1, 2)).reshape(C.INPUT_DAYS * 3, H, W)]
+        if self.n_drivers:
+            if drv_hist is None:
+                drv_hist = np.zeros((C.INPUT_DAYS, H, W, self.n_drivers), "float32")
+            parts.append(np.asarray(drv_hist, dtype="float32")
+                         .transpose(0, 3, 1, 2).reshape(-1, H, W))
+        parts.append(D._poa_channels(hist[-1]))
+        X = np.concatenate(parts, axis=0).astype("float32")
         out = self._infer(X)
         return self._reconstruct(out, start_ts, carr, std)
 
@@ -104,28 +135,31 @@ class Forecaster:
         design (IMD NEPS / NCEP GEFS):
           * initial-condition perturbations — Gaussian noise (sigma `ic_sigma`,
             the training-time input-noise scale, i.e. within analysis error)
-            on the history channels only, never the POA prior;
+            on the history/driver channels, never the POA prior directly;
+            the POA prior is rebuilt from the perturbed last day so the
+            perturbation propagates through the prior;
           * model uncertainty — the bottleneck dropout is kept stochastic
             (MC-dropout), sampling a different sub-network each pass.
 
         Returns mean frames + per-cell spread (std, real units) per variable.
         """
-        X, _ = D._window(cube, t)
-        hist_ch = C.INPUT_DAYS * 3
+        X, _ = D._window(cube, t, self.dcube if self.n_drivers else None)
+        hist_ch = self.model.hist_ch
+        noise_ch = hist_ch + self.model.drv_ch
         rho = np.array([C.RHO[v] for v in C.VARIABLES], dtype="float32")
         self.model.drop.train()                       # stochastic bottleneck only
         outs = []
         for i in range(n):
             Xp = X.copy()
             if i > 0 and ic_sigma > 0:                # member 0 = control run
-                Xp[:hist_ch] += np.random.default_rng(i).normal(
-                    0.0, ic_sigma, Xp[:hist_ch].shape).astype("float32")
+                Xp[:noise_ch] += np.random.default_rng(i).normal(
+                    0.0, ic_sigma, Xp[:noise_ch].shape).astype("float32")
                 # the POA prior is part of the initial state: rebuild it from
                 # the perturbed last observed day so the perturbation
                 # propagates through the prior, not only the history
                 last = Xp[hist_ch - 3:hist_ch]        # (3,H,W) perturbed last day
                 for k in range(C.HORIZON):
-                    Xp[hist_ch + k * 3: hist_ch + (k + 1) * 3] = \
+                    Xp[noise_ch + k * 3: noise_ch + (k + 1) * 3] = \
                         last * (rho ** (k + 1))[:, None, None]
             outs.append(self._infer(Xp))
         self.model.drop.eval()

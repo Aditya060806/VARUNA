@@ -1,0 +1,212 @@
+[prepare] downloading IMD years: [1981, 1982, 1983, 1984, 1985, 1986, 1987, 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024]
+[download] rain  1981-2024 ...
+[download] tmax  1981-2024 ...
+[download] tmin  1981-2024 ...
+[prepare] regridding temperature -> rain grid ...
+[prepare] land cells: 4964/17415
+[prepare] building smoothed climatology (train years) ...
+[prepare] computing anomaly std (train years) ...
+   rain: anom_std=9.9306
+   tmax: anom_std=2.0257
+   tmin: anom_std=1.5958
+[prepare] done. obs={'lat': 129, 'lon': 135, 'time': 16071}  1981-01-01..2024-12-31
+[drivers] slp 1981 ok
+[drivers] slp 1982 ok
+[drivers] slp 1983 ok
+[drivers] slp 1984 ok
+[drivers] slp 1985 ok
+[drivers] slp 1986 ok
+[drivers] slp 1987 ok
+[drivers] slp 1988 ok
+[drivers] slp 1989 ok
+[drivers] slp 1990 ok
+[drivers] slp 1991 ok
+[drivers] slp 1992 ok
+[drivers] slp 1993 ok
+[drivers] slp 1994 ok
+[drivers] slp 1995 ok
+[drivers] slp 1996 ok
+[drivers] slp 1997 ok
+[drivers] slp 1998 ok
+[drivers] slp 1999 ok
+[drivers] slp 2000 ok
+[drivers] slp 2001 ok
+[drivers] slp 2002 ok
+[drivers] slp 2003 ok
+[drivers] slp 2004 ok
+[drivers] slp 2005 ok
+[drivers] slp 2006 ok
+[drivers] slp 2007 ok
+[drivers] slp 2008 ok
+[drivers] slp 2009 ok
+[drivers] slp 2010 ok
+[drivers] slp 2011 ok
+[drivers] slp 2012 ok
+[drivers] slp 2013 ok
+[drivers] slp 2014 ok
+[drivers] slp 2015 ok
+[drivers] slp 2016 ok
+[drivers] slp 2017 ok
+[drivers] slp 2018 ok
+[drivers] slp 2019 ok
+[drivers] slp 2020 ok
+[drivers] slp 2021 ok
+[drivers] slp 2022 ok
+[drivers] slp 2023 ok
+[drivers] slp 2024 ok
+[drivers] u850 1981 ok
+[drivers] u850 1982 ok
+[drivers] u850 1983 ok
+[drivers] u850 1984 ok
+[drivers] u850 1985 ok
+[drivers] u850 1986 ok
+[drivers] u850 1987 ok
+[drivers] u850 1988 ok
+[drivers] u850 1989 ok
+[drivers] u850 1990 ok
+[drivers] u850 1991 ok
+[drivers] u850 1992 ok
+[drivers] u850 1993 ok
+[drivers] u850 1994 ok
+[drivers] u850 1995 ok
+[drivers] u850 1996 ok
+[drivers] u850 1997 ok
+[drivers] u850 1998 ok
+[drivers] u850 1999 ok
+[drivers] u850 2000 ok
+[drivers] u850 2001 ok
+[drivers] u850 2002 ok
+[drivers] u850 2003 ok
+[drivers] u850 2004 ok
+[drivers] u850 2005 ok
+[drivers] u850 2006 ok
+[drivers] u850 2007 ok
+[drivers] u850 2008 ok
+[drivers] u850 2009 ok
+[drivers] u850 2010 ok
+[drivers] u850 2011 ok
+[drivers] u850 2012 ok
+[drivers] u850 2013 ok
+[drivers] u850 2014 ok
+[drivers] u850 2015 ok
+[drivers] u850 2016 ok
+[drivers] u850 2017 ok
+[drivers] u850 2018 ok
+[drivers] u850 2019 ok
+[drivers] u850 2020 ok
+[drivers] u850 2021 ok
+[drivers] u850 2022 ok
+[drivers] u850 2023 ok
+[drivers] u850 2024 ok
+[drivers] v850 1981 ok
+[drivers] v850 1982 ok
+[drivers] v850 1983 ok
+[drivers] v850 1984 ok
+[drivers] v850 1985 ok
+[drivers] v850 1986 ok
+[drivers] v850 1987 ok
+[drivers] v850 1988 ok
+[drivers] v850 1989 ok
+[drivers] v850 1990 ok
+[drivers] v850 1991 ok
+[drivers] v850 1992 ok
+[drivers] v850 1993 ok
+[drivers] v850 1994 ok
+[drivers] v850 1995 ok
+[drivers] v850 1996 ok
+[drivers] v850 1997 ok
+[drivers] v850 1998 ok
+[drivers] v850 1999 ok
+[drivers] v850 2000 ok
+[drivers] v850 2001 ok
+[drivers] v850 2002 ok
+[drivers] v850 2003 ok
+[drivers] v850 2004 ok
+[drivers] v850 2005 ok
+[drivers] v850 2006 ok
+[drivers] v850 2007 ok
+[drivers] v850 2008 ok
+[drivers] v850 2009 ok
+[drivers] v850 2010 ok
+[drivers] v850 2011 ok
+[drivers] v850 2012 ok
+[drivers] v850 2013 ok
+[drivers] v850 2014 ok
+[drivers] v850 2015 ok
+[drivers] v850 2016 ok
+[drivers] v850 2017 ok
+[drivers] v850 2018 ok
+[drivers] v850 2019 ok
+[drivers] v850 2020 ok
+[drivers] v850 2021 ok
+[drivers] v850 2022 ok
+[drivers] v850 2023 ok
+[drivers] v850 2024 ok
+[drivers] pwat 1981 ok
+[drivers] pwat 1982 ok
+[drivers] pwat 1983 ok
+[drivers] pwat 1984 ok
+[drivers] pwat 1985 ok
+[drivers] pwat 1986 ok
+[drivers] pwat 1987 ok
+[drivers] pwat 1988 ok
+[drivers] pwat 1989 ok
+[drivers] pwat 1990 ok
+[drivers] pwat 1991 ok
+[drivers] pwat 1992 ok
+[drivers] pwat 1993 ok
+[drivers] pwat 1994 ok
+[drivers] pwat 1995 ok
+[drivers] pwat 1996 ok
+[drivers] pwat 1997 ok
+[drivers] pwat 1998 ok
+[drivers] pwat 1999 ok
+[drivers] pwat 2000 ok
+[drivers] pwat 2001 ok
+[drivers] pwat 2002 ok
+[drivers] pwat 2003 ok
+[drivers] pwat 2004 ok
+[drivers] pwat 2005 ok
+[drivers] pwat 2006 ok
+[drivers] pwat 2007 ok
+[drivers] pwat 2008 ok
+[drivers] pwat 2009 ok
+[drivers] pwat 2010 ok
+[drivers] pwat 2011 ok
+[drivers] pwat 2012 ok
+[drivers] pwat 2013 ok
+[drivers] pwat 2014 ok
+[drivers] pwat 2015 ok
+[drivers] pwat 2016 ok
+[drivers] pwat 2017 ok
+[drivers] pwat 2018 ok
+[drivers] pwat 2019 ok
+[drivers] pwat 2020 ok
+[drivers] pwat 2021 ok
+[drivers] pwat 2022 ok
+[drivers] pwat 2023 ok
+[drivers] pwat 2024 ok
+[drivers] building slp ...
+   slp: anom_std=346.150
+[drivers] building u850 ...
+   u850: anom_std=3.400
+[drivers] building v850 ...
+   v850: anom_std=2.523
+[drivers] building pwat ...
+   pwat: anom_std=4.935
+[drivers] done: cube (T=16071, 129x135, K=4) + stats saved
+[train] device: cuda
+[train] drivers: ['slp', 'u850', 'v850', 'pwat'] -> v2
+[train] windows  train=13872 val=731 test=1452
+[train] using 4624 train windows (stride 3)
+[train] params: 7,436,994  in_ch: 79
+[train] epoch 01/60  train 0.2719  phys 0.00038  val 0.3070  lr 2.50e-03  405.6s
+[train] epoch 02/60  train 0.2642  phys 0.00027  val 0.3057  lr 2.49e-03  361.6s
+[train] epoch 03/60  train 0.2612  phys 0.00025  val 0.3040  lr 2.48e-03  361.7s
+[train] epoch 04/60  train 0.2593  phys 0.00022  val 0.3003  lr 2.47e-03  360.3s
+[train] epoch 05/60  train 0.2571  phys 0.00022  val 0.3042  lr 2.46e-03  335.8s
+[train] epoch 06/60  train 0.2559  phys 0.00022  val 0.3010  lr 2.44e-03  310.1s
+[train] epoch 07/60  train 0.2542  phys 0.00021  val 0.2997  lr 2.42e-03  321.4s
+[train] epoch 08/60  train 0.2527  phys 0.00023  val 0.2961  lr 2.39e-03  300.1s
+[train] epoch 09/60  train 0.2513  phys 0.00021  val 0.2986  lr 2.36e-03  375.5s
+[train] epoch 10/60  train 0.2501  phys 0.00022  val 0.2972  lr 2.33e-03  381.6s

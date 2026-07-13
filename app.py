@@ -224,6 +224,33 @@ if view == VIEWS[0]:
             st.metric("RMSE to obs · before", f"{before['rmse']:.2f} {unit}")
             st.metric("RMSE to obs · after OI", f"{after['rmse']:.2f} {unit}",
                       f"{after['rmse']-before['rmse']:+.2f}", delta_color="inverse")
+            # --- cyclic assimilation: the analysis initialises the next cycle ---
+            if t + 1 < len(dates) and st.button("🔁 Close the loop — run next cycle"):
+                doy_t = min(int(dates[t].dayofyear), 365)
+                hist_free = np.array(cube[t + 1 - C.INPUT_DAYS:t + 1], dtype="float32")
+                hist_asm = hist_free.copy()
+                for vi_, v_ in enumerate(C.VARIABLES):
+                    bg_v = frames[v_][0]
+                    ana_v = assimilate.optimal_interpolation(
+                        bg_v, obs[v_].values[t], length_scale=L, landmask=landmask)
+                    hist_free[-1, :, :, vi_] = (bg_v - carr[v_][doy_t - 1]) / (std[vi_] + 1e-6)
+                    hist_asm[-1, :, :, vi_] = (ana_v - carr[v_][doy_t - 1]) / (std[vi_] + 1e-6)
+                dh = (np.asarray(fc.dcube[t + 1 - C.INPUT_DAYS:t + 1], dtype="float32")
+                      if getattr(fc, "n_drivers", 0) else None)
+                start2 = dates[t] + pd.Timedelta(days=1)
+                f_free = fc.predict_window(hist_free, start2, carr, std, dh)
+                f_asm = fc.predict_window(hist_asm, start2, carr, std, dh)
+                truth2 = obs[base_var].values[t + 1]
+                r_free = assimilate.innovation_stats(f_free["frames"][base_var][0], truth2)["rmse"]
+                r_asm = assimilate.innovation_stats(f_asm["frames"][base_var][0], truth2)["rmse"]
+                st.metric("Next-day RMSE · forecast-only cycle", f"{r_free:.2f} {unit}")
+                st.metric("Next-day RMSE · assimilated cycle", f"{r_asm:.2f} {unit}",
+                          f"{r_asm - r_free:+.2f}", delta_color="inverse")
+                st.caption("**The twin loop, closed:** the OI analysis (not the raw "
+                           "background) initialised the next forecast cycle — "
+                           "observe → forecast → assimilate → forecast. The "
+                           "assimilated cycle tracks tomorrow's truth closer than "
+                           "the forecast-only cycle.")
 
     # --- forecast uncertainty (MC-dropout ensemble) + physics audit ---
     if fmode == "ai":
@@ -477,11 +504,13 @@ elif view == VIEWS[3]:
             st.stop()
 
         hist0, n_real = user_obs.build_history(cube, dates, start_ts)
-        base = fc.predict_window(hist0, start_ts, carr, std)
+        dh_b = (user_obs.build_driver_history(fc.dcube, dates, start_ts, fc.n_drivers)
+                if getattr(fc, "n_drivers", 0) else None)
+        base = fc.predict_window(hist0, start_ts, carr, std, dh_b)
         hist1, innov_report = user_obs.inject_observations(
             hist0.copy(), start_ts, user_df, carr, std, iy_b, ix_b,
             length_scale=Lb, sigma_o=sigma_o)
-        mine = fc.predict_window(hist1, start_ts, carr, std)
+        mine = fc.predict_window(hist1, start_ts, carr, std, dh_b)
 
         if not innov_report:
             st.warning("No observation fell inside the 7-day input window before the "
@@ -580,6 +609,29 @@ elif view == VIEWS[4]:
              "Skill vs persist-anomaly": [EVAL["ai"][v]["skill_vs_poa"][0]*100 for v in C.VARIABLES]},
             "Day-1 skill over operational baselines", "% improvement", height=300)
         st.plotly_chart(bar, use_container_width=True, key="skillbar")
+
+        # categorical extreme-event verification (contingency-table scores)
+        if "events" in EVAL.get("ai", {}):
+            st.markdown("#### Extreme-event detection — categorical skill (day 1, unseen years)")
+            enames = {"heatwave": "🔥 Heatwave (IMD departure criteria)",
+                      "heavy_rain": "🌧️ Heavy rain (≥ 64.5 mm/day)"}
+            ecols = st.columns(2)
+            for j, e in enumerate(enames):
+                with ecols[j]:
+                    ev = EVAL["ai"]["events"][e]
+                    st.markdown(f"**{enames[e]}**")
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("POD", f"{ev['pod'][0]*100:.0f}%",
+                              "detection rate", delta_color="off")
+                    m2.metric("FAR", f"{ev['far'][0]*100:.0f}%",
+                              "false alarms", delta_color="off")
+                    poa_ets = EVAL["poa"]["events"][e]["ets"][0]
+                    m3.metric("ETS", f"{ev['ets'][0]:.3f}",
+                              f"POA {poa_ets:.3f}", delta_color="off")
+            st.caption("POD / FAR / ETS from area-weighted contingency tables — the "
+                       "operational categorical verification used for warnings (ETS = "
+                       "skill relative to random hits; higher is better). Compared "
+                       "against the persistence-of-anomaly baseline.")
 
     # companion model — XGBoost validation skill (real units, val years 2019–2020)
     if XGB_REPORT:

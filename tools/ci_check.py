@@ -119,6 +119,21 @@ def check_user_obs():
         "invalid values must be masked (negative rain / tmin>tmax)"
 
 
+def check_event_scores():
+    from evaluation import metrics as M
+    w = np.ones((4, 4))
+    pred = np.zeros((4, 4), bool); pred[:2] = True
+    obs = np.zeros((4, 4), bool); obs[:2] = True
+    perfect = M.event_scores(M.event_counts(pred, obs, w))
+    assert perfect["pod"] == 1.0 and perfect["far"] == 0.0 and perfect["ets"] == 1.0, \
+        "perfect forecast must score POD=1, FAR=0, ETS=1"
+    none = M.event_scores(M.event_counts(~obs, obs, w))
+    assert none["pod"] == 0.0, "total miss must score POD=0"
+    # counts must accumulate additively across windows
+    c = M.event_counts(pred, obs, w) + M.event_counts(pred, obs, w)
+    assert M.event_scores(c)["pod"] == 1.0
+
+
 def check_physics():
     from analytics import physics
     frames = {"tmax": np.full((3, 5, 5), 30.0), "tmin": np.full((3, 5, 5), 22.0),
@@ -148,6 +163,7 @@ def main():
     gate("assimilation (OI)", check_assimilate)
     gate("user observations (BYOO)", check_user_obs)
     gate("physics diagnostics", check_physics)
+    gate("categorical event scores", check_event_scores)
     gate("INSAT filename parser", check_insat_parser)
 
     if FAILURES:

@@ -47,3 +47,37 @@ def wacc(pred, true, clim, w):
 
 def skill(rmse, rmse_ref):
     return float(1.0 - rmse / rmse_ref) if rmse_ref > 0 else float("nan")
+
+
+def event_counts(pred_event, obs_event, w):
+    """Area-weighted contingency counts (hits, misses, false alarms, correct
+    negatives) for a boolean event field pair — accumulate these across
+    windows, then convert with `event_scores` (never average per-window
+    ratios)."""
+    p = np.asarray(pred_event, bool)
+    o = np.asarray(obs_event, bool)
+    return np.array([
+        float(np.sum(w * (p & o))),          # hits
+        float(np.sum(w * (~p & o))),         # misses
+        float(np.sum(w * (p & ~o))),         # false alarms
+        float(np.sum(w * (~p & ~o))),        # correct negatives
+    ])
+
+
+def event_scores(counts):
+    """Contingency counts -> operational categorical verification scores.
+
+    POD (probability of detection), FAR (false-alarm ratio), CSI (critical
+    success index) and ETS (equitable threat score — skill relative to random
+    hits, the standard headline score for rare events).
+    """
+    hits, miss, fa, cn = [float(x) for x in counts]
+    total = hits + miss + fa + cn
+    pod = hits / (hits + miss) if hits + miss > 0 else float("nan")
+    far = fa / (hits + fa) if hits + fa > 0 else float("nan")
+    csi = hits / (hits + miss + fa) if hits + miss + fa > 0 else float("nan")
+    h_rand = (hits + miss) * (hits + fa) / total if total > 0 else 0.0
+    denom = hits + miss + fa - h_rand
+    ets = (hits - h_rand) / denom if denom > 0 else float("nan")
+    base = (hits + miss) / total if total > 0 else float("nan")
+    return {"pod": pod, "far": far, "csi": csi, "ets": ets, "base_rate": base}

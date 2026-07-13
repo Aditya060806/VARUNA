@@ -78,14 +78,17 @@ class ClimateUNet(nn.Module):
     """
 
     def __init__(self, input_days=C.INPUT_DAYS, horizon=C.HORIZON, n_vars=3,
-                 base=48, pad_to=144, grid=(C.GRID_NLAT, C.GRID_NLON), dropout=0.2):
+                 n_drivers=0, base=48, pad_to=144,
+                 grid=(C.GRID_NLAT, C.GRID_NLON), dropout=0.2):
         super().__init__()
         self.H, self.W = grid
         self.pad_to = pad_to
         self.hist_ch = input_days * n_vars          # 21
+        self.drv_ch = input_days * n_drivers        # 0 (v1) or 28 (v2, K=4)
         self.poa_ch = horizon * n_vars              # 30
-        self.in_ch = self.hist_ch + self.poa_ch     # 51
+        self.in_ch = self.hist_ch + self.drv_ch + self.poa_ch   # 51 / 79
         self.out_ch = horizon * n_vars              # 30
+        self.n_drivers = n_drivers
 
         self.stem = nn.Conv2d(self.in_ch, base, 3, padding=1)
         self.e1 = ResBlock(base, base)
@@ -102,7 +105,7 @@ class ClimateUNet(nn.Module):
         nn.init.zeros_(self.head.weight); nn.init.zeros_(self.head.bias)  # start at POA
 
     def forward(self, x):
-        poa = x[:, self.hist_ch:, :self.H, :self.W]  # POA prior at full grid
+        poa = x[:, self.hist_ch + self.drv_ch:, :self.H, :self.W]  # POA prior
         ph, pw = self.pad_to - self.H, self.pad_to - self.W
         z = F.pad(x, (0, pw, 0, ph))
         z = F.gelu(self.stem(z))

@@ -141,10 +141,12 @@ def _poa_channels(last_day):
     return poa.reshape(C.HORIZON * 3, H, W)
 
 
-def _window(cube, t):
+def _window(cube, t, dcube=None):
     """(X, Y) channels-first windows at forecast-start index t.
 
-    X = [7-day history anomalies (21ch)] + [POA prior for 10 leads (30ch)] = 51ch
+    X = [7-day history anomalies (21ch)]
+        (+ [7-day driver anomalies (7*K ch)] when a driver cube is given)
+        + [POA prior for 10 leads (30ch)]
     Y = [10-day target anomalies (30ch)]
     The POA prior lets the model learn a *residual correction* on top of a strong
     baseline, so it can only match-or-beat persistence-of-anomaly.
@@ -153,22 +155,48 @@ def _window(cube, t):
     x = cube[t - C.INPUT_DAYS:t]                 # (INPUT_DAYS,H,W,3)
     y = cube[t:t + C.HORIZON]                    # (HORIZON,H,W,3)
     hist = np.transpose(x, (0, 3, 1, 2)).reshape(C.INPUT_DAYS * 3, H, W)
-    poa = _poa_channels(cube[t - 1])             # (HORIZON*3,H,W)
-    X = np.concatenate([hist, poa], axis=0)      # (51,H,W)
+    parts = [hist]
+    if dcube is not None:
+        d = np.asarray(dcube[t - C.INPUT_DAYS:t], dtype="float32")
+        parts.append(np.transpose(d, (0, 3, 1, 2)).reshape(-1, H, W))
+    parts.append(_poa_channels(cube[t - 1]))     # (HORIZON*3,H,W)
+    X = np.concatenate(parts, axis=0)            # (51 or 51+7K, H, W)
     Y = np.transpose(y, (0, 3, 1, 2)).reshape(C.HORIZON * 3, H, W)
     return X.astype("float32"), Y.astype("float32")
 
 
-class WindowDataset(Dataset):
-    """Supervised windows for a split, materialised lazily from the cube."""
+def lead_doys(dates):
+    """(T, HORIZON) int32 day-of-year (1..366) for each forecast lead day.
 
-    def __init__(self, cube, idx):
+    Used by the physics-informed losses to look up the climatology of each
+    target day when reconstructing real-unit fields inside the loss.
+    """
+    base = dates.dayofyear.values.astype("int32")
+    T = len(base)
+    out = np.empty((T, C.HORIZON), dtype="int64")
+    for k in range(C.HORIZON):
+        out[:T - k, k] = base[k:]
+        if k:
+            out[T - k:, k] = base[-1]            # tail padding (never sampled)
+    return np.clip(out, 1, 366)
+
+
+class WindowDataset(Dataset):
+    """Supervised windows for a split, materialised lazily from the cube(s)."""
+
+    def __init__(self, cube, idx, dcube=None, doys=None):
         self.cube = cube
+        self.dcube = dcube
+        self.doys = doys                          # (T,HORIZON) or None
         self.idx = np.asarray(idx)
 
     def __len__(self):
         return len(self.idx)
 
     def __getitem__(self, i):
-        X, Y = _window(self.cube, int(self.idx[i]))
+        t = int(self.idx[i])
+        X, Y = _window(self.cube, t, self.dcube)
+        if self.doys is not None:
+            return torch.from_numpy(X), torch.from_numpy(Y), \
+                torch.from_numpy(self.doys[t])
         return torch.from_numpy(X), torch.from_numpy(Y)

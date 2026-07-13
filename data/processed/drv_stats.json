@@ -1,0 +1,28 @@
+{
+  "drivers": [
+    "slp",
+    "u850",
+    "v850",
+    "pwat"
+  ],
+  "stats": {
+    "slp": {
+      "anom_std": 346.1497802734375,
+      "native_mean": 101258.8984375
+    },
+    "u850": {
+      "anom_std": 3.399653673171997,
+      "native_mean": 1.5060769319534302
+    },
+    "v850": {
+      "anom_std": 2.523296356201172,
+      "native_mean": 0.11639727652072906
+    },
+    "pwat": {
+      "anom_std": 4.935373306274414,
+      "native_mean": 26.74190902709961
+    }
+  },
+  "source": "NCEP/NCAR R1 daily (NOAA PSL NCSS)",
+  "n_time": 16071
+}

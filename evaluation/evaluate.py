@@ -18,20 +18,27 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config as C  # noqa: E402
 from models import baseline, dataset as D  # noqa: E402
-from models.forecast import Forecaster  # noqa: E402
+from models.forecast import Forecaster, default_checkpoint  # noqa: E402
 from evaluation import metrics as M  # noqa: E402
+from analytics import extremes  # noqa: E402
+
+HEAVY_RAIN_MM = 64.5      # IMD "heavy" daily rainfall threshold
+EVENTS = ["heatwave", "heavy_rain"]
 
 
-def run(max_windows=None, stride=1):
+def run(max_windows=None, stride=1, ckpt=None):
     obs, clim, stats, landmask, grid = D.load_cache()
     cube, dates, carr, std = D.build_anomaly_cube(obs, clim, stats)
     splits = D.split_indices(dates)
     test_idx = splits["test"][::stride]
     if max_windows:
         test_idx = test_idx[:max_windows]
-    print(f"[eval] evaluating {len(test_idx)} test windows", flush=True)
 
-    fc = Forecaster()
+    fc = Forecaster(ckpt)
+    stem = fc.ckpt_name.replace(".pt", "")
+    tag = "" if stem == "climate_unet" else "_" + stem.replace("climate_unet_", "")
+    print(f"[eval] evaluating {len(test_idx)} test windows  "
+          f"ckpt={fc.ckpt_name} drivers={fc.drivers or 'none'}", flush=True)
     w = M._wstats(landmask, grid["lat"])
     obs_arr = {v: obs[v].values for v in C.VARIABLES}
 
@@ -40,6 +47,9 @@ def run(max_windows=None, stride=1):
     acc = {m: {v: {"se": np.zeros(C.HORIZON), "ae": np.zeros(C.HORIZON),
                    "acc": np.zeros(C.HORIZON), "n": np.zeros(C.HORIZON)}
                for v in C.VARIABLES} for m in methods}
+    # categorical extreme-event contingency counts: method -> event -> (4, HORIZON)
+    ev_counts = {m: {e: np.zeros((4, C.HORIZON)) for e in EVENTS}
+                 for m in ["ai", "poa", "persistence"]}
 
     for t in test_idx:
         t = int(t)
@@ -63,6 +73,15 @@ def run(max_windows=None, stride=1):
                     acc[m][v]["ae"][lead] += M.wmae(p, truth, w)
                     acc[m][v]["acc"][lead] += M.wacc(p, truth, cl, w)
                     acc[m][v]["n"][lead] += 1
+            # extreme-event detection (categorical, IMD criteria)
+            cl_tmax = carr["tmax"][doy - 1]
+            obs_hw = extremes.heatwave_severity(obs_arr["tmax"][ti], cl_tmax) >= 1
+            obs_hr = obs_arr["rain"][ti] >= HEAVY_RAIN_MM
+            for m in ev_counts:
+                pred_hw = extremes.heatwave_severity(preds[m]["tmax"][lead], cl_tmax) >= 1
+                pred_hr = preds[m]["rain"][lead] >= HEAVY_RAIN_MM
+                ev_counts[m]["heatwave"][:, lead] += M.event_counts(pred_hw, obs_hw, w)
+                ev_counts[m]["heavy_rain"][:, lead] += M.event_counts(pred_hr, obs_hr, w)
 
     # reduce
     results = {}
@@ -84,12 +103,39 @@ def run(max_windows=None, stride=1):
         results["ai"][v]["skill_vs_poa"] = [
             M.skill(rmse_ai[k], results["poa"][v]["rmse"][k]) for k in range(C.HORIZON)]
 
+    # categorical extreme-event scores (from accumulated contingency counts)
+    for m in ev_counts:
+        results[m]["events"] = {}
+        for e in EVENTS:
+            per_lead = [M.event_scores(ev_counts[m][e][:, k]) for k in range(C.HORIZON)]
+            results[m]["events"][e] = {
+                s: [pl[s] for pl in per_lead]
+                for s in ("pod", "far", "csi", "ets", "base_rate")}
+
+    results["meta"] = {"checkpoint": fc.ckpt_name, "drivers": fc.drivers,
+                       "n_windows": int(len(test_idx))}
     os.makedirs(C.OUTPUTS_DIR, exist_ok=True)
-    with open(os.path.join(C.OUTPUTS_DIR, "eval_metrics.json"), "w") as f:
+    out_json = os.path.join(C.OUTPUTS_DIR, f"eval_metrics{tag}.json")
+    with open(out_json, "w") as f:
         json.dump(results, f, indent=2)
     _print_table(results)
+    _print_events(results)
     _plot(results)
+    print(f"[eval] wrote {out_json}", flush=True)
     return results
+
+
+def _print_events(results):
+    print("\n============ EXTREME-EVENT DETECTION (day 1 / day 3) ============")
+    for e in EVENTS:
+        print(f"\n--- {e} ---")
+        print(f"{'method':>12} | {'POD d1':>7} {'FAR d1':>7} {'CSI d1':>7} "
+              f"{'ETS d1':>7} | {'POD d3':>7} {'ETS d3':>7}")
+        for m in ("ai", "poa", "persistence"):
+            ev = results[m]["events"][e]
+            print(f"{m:>12} | {ev['pod'][0]:7.3f} {ev['far'][0]:7.3f} "
+                  f"{ev['csi'][0]:7.3f} {ev['ets'][0]:7.3f} | "
+                  f"{ev['pod'][2]:7.3f} {ev['ets'][2]:7.3f}")
 
 
 def _print_table(results):
@@ -127,4 +173,5 @@ def _plot(results):
 
 
 if __name__ == "__main__":
-    run()
+    _ckpt = next((a for a in sys.argv[1:] if a.endswith(".pt")), None)
+    run(ckpt=_ckpt)

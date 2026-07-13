@@ -98,6 +98,10 @@ and the downstream effect of an intervention **before spending a single rupee**.
 |---|---|
 | 🇮🇳 | **100% national data** — IMD gridded rainfall + temperature, INSAT‑3DR satellite. No synthetic data anywhere. |
 | 🧠 | **ClimateUNet** — a residual, attention‑based spatiotemporal CNN that forecasts **10 days** of rain/tmax/tmin in one pass. |
+| 🌀 | **Synoptic drivers (v2)** — sea‑level **pressure**, **850‑hPa winds** and **precipitable water** join the inputs, giving the network the dynamics a surface‑only model is blind to. |
+| ⚖️ | **Physics‑informed training (v2)** — mass non‑negativity + thermodynamic‑ordering penalties inside the loss; every forecast audited live against first‑order laws. |
+| 📥 | **Bring‑Your‑Own‑Observations** — type or upload your last days of weather; the twin assimilates them via Optimal Interpolation and re‑forecasts (works beyond the archive). |
+| 🎲 | **Perturbed‑ensemble uncertainty** — initial‑condition + MC‑dropout members (NEPS/GEFS design) → per‑cell forecast spread maps. |
 | 📈 | **Validated skill** — temperature MAE **0.6–0.8 °C**, anomaly correlation **0.76**, beats persistence by **6–28 %** on unseen 2021–2024 data. |
 | 🌪️ | **Hazard early‑warning** — heatwave, heavy‑rain and dry‑spell maps straight from the forecast. |
 | 🔭 | **Real satellite fusion** — INSAT‑3DR LST ingested, regridded, cross‑checked against the model. |
@@ -112,7 +116,8 @@ and the downstream effect of an intervention **before spending a single rupee**.
 |---|---|
 | **Domain** | All‑India, 0.25° grid (129 × 135), 4,964 land cells |
 | **Data span** | 1981–2024 · **16,071 daily fields** · 3 IMD variables + INSAT‑3DR LST |
-| **Model** | ClimateUNet — **7.42 M** params, residual U‑Net + attention, 10‑day direct horizon |
+| **Synoptic drivers (v2)** | MSLP · u850 · v850 · precipitable water (NCEP/NCAR reanalysis daily, 1981–2024) |
+| **Model** | ClimateUNet — **7.42 M** params, residual U‑Net + attention, 10‑day direct horizon (v2: **79** input channels, physics‑informed loss) |
 | **Trained on** | NVIDIA RTX 4050 (6 GB), PyTorch + CUDA, mixed precision |
 | **Day‑1 accuracy** | Tmax **MAE 0.82 °C**, Tmin **0.59 °C**, Rain **3.16 mm** · ACC **0.76** |
 | **Skill** | Beats persistence by **6–28 %**; beats persistence‑of‑anomaly on temperature |
@@ -129,9 +134,10 @@ sectors and a what‑if interface."* VARUNA implements every clause:
 
 | PS requirement | VARUNA delivery |
 |---|---|
-| Multi‑source national data | **IMD** (rain 0.25°, tmax/tmin 1°) + **INSAT‑3DR** (LST) via MOSDAC |
-| AI/ML short‑term prediction | **ClimateUNet** (deep CNN) + **XGBoost** ensemble |
-| Data assimilation | **Optimal Interpolation** (correlated background‑error covariance) |
+| Multi‑source national data | **IMD** (rain 0.25°, tmax/tmin 1°) + **INSAT‑3DR** (LST) via MOSDAC + synoptic reanalysis drivers (v2) |
+| AI/ML short‑term prediction | **ClimateUNet** (deep CNN, v2 physics‑informed + drivers) + **XGBoost** ensemble |
+| Data assimilation | **Optimal Interpolation** (correlated background‑error covariance) — cyclic, and open to **user observations** (BYOO) |
+| Uncertainty sources (several models) | **Perturbed IC + MC‑dropout ensemble** · CNN vs XGBoost · three reference baselines |
 | Continuously evolving climate state | Forecast → assimilation → state loop on the national grid |
 | Applications for climate‑sensitive sectors | **Urban heat** (NWS heat index, LST/UHI) + **air quality** (CPCB AQI) |
 | What‑if simulation | Live scenario sliders → instant impact maps |
@@ -193,6 +199,15 @@ ClimateUNet input  (N, 51, 129, 135)   →   output (N, 30, 129, 135)
 forecast frames {rain,tmax,tmin} × 10 lead days  (real units)
 ```
 
+**v2 adds a driver stream** — 4 synoptic anomaly fields × 7 history days join the input:
+
+```
+NCEP daily drivers ─► driver cube (16071, 129, 135, 4)  [slp, u850, v850, pwat]
+        │ train-years climatology + std (native grid), regrid 2.5° → 0.25°
+        ▼
+ClimateUNet v2 input (N, 79, 129, 135) = 21 obs-history + 28 driver + 30 POA prior
+```
+
 ---
 
 ## Data Sources
@@ -210,6 +225,21 @@ satellite via [MOSDAC](https://www.mosdac.gov.in/).
 | (ready) Sea Surface Temp | INSAT‑3DR `3RIMG_L2B_SST` | full‑disk | — | drop‑in supported |
 
 **Coverage:** national bounding box 66.5–100.0 °E, 6.5–38.5 °N · **4,964 land cells** on the 129×135 grid.
+
+**Synoptic drivers (v2)** — the dynamics a surface‑only model cannot see, ingested by `data/drivers.py`:
+
+| Driver | Physics it injects | Product | Native grid |
+|---|---|---|---|
+| MSLP | pressure gradients that drive the flow | NCEP/NCAR R1 daily `slp` | 2.5° → 0.25° |
+| u850, v850 | monsoon circulation / moisture‑advection level | NCEP/NCAR R1 daily `uwnd`/`vwnd` @850 hPa | 2.5° → 0.25° |
+| Precipitable water | total‑column moisture supply for rainfall | NCEP/NCAR R1 daily `pr_wtr` | 2.5° → 0.25° |
+
+Fetched openly (no credentials) from **NOAA PSL**'s NetcdfSubset service, 1948→present — so drivers
+cover the full 1981–2024 span *and today*. Driver climatology + anomaly σ are computed on the
+**native grid from train years only**, then scaled anomalies are regridded to the national grid.
+The ingest is **source‑agnostic**: **IMDAA** (NCMRWF's 12‑km Indian reanalysis; registration
+required, open BharatBench release ends 2020) drops into the same regridder for a fully‑national
+driver set — synoptic systems are ≳500 km scale, so 2.5° drivers resolve them.
 
 **Chronological split (no leakage):**
 
@@ -230,6 +260,9 @@ Implemented in `data/` — robust, cached, reproducible:
 3. **Climatology** (`climatology.py`) — smoothed **day‑of‑year** mean (21‑day circular window) built **from training years only** → no leakage.
 4. **Anomalies** — `anomaly = (obs − climatology) / anomaly_std`; per‑variable std computed on train years.
 5. **Cache** — compact NetCDF + a memory‑mapped anomaly cube for fast startup.
+6. **Drivers (v2)** (`drivers.py`) — downloads MSLP / 850‑hPa winds / precipitable water,
+   builds train‑years climatology + σ on the native grid, regrids scaled anomalies to 0.25°,
+   and caches a float16 memory‑mapped driver cube aligned 1:1 with the observation dates.
 
 **Anomaly normalisation statistics (train years):**
 
@@ -272,12 +305,33 @@ flowchart TD
 | Property | Value |
 |---|---|
 | Type | Residual U‑Net + Squeeze‑Excite channel attention |
-| Parameters | **7,424,898** |
-| Input | `(51, 129, 135)` — history (21) + POA prior (30) |
+| Parameters | **7,424,898** (v1) · **7,436,994** (v2) |
+| Input | v1 `(51, 129, 135)` — history (21) + POA prior (30) · v2 `(79, 129, 135)` — + 28 driver channels |
 | Output | `(30, 129, 135)` — 10 lead days × 3 variables (anomalies) |
 | Normalisation | GroupNorm · activation GELU |
 | Framework | PyTorch 2.5 + CUDA 12.1 (mixed precision) |
 | Hardware | NVIDIA RTX 4050 (6 GB) |
+
+### ClimateUNet v2 — synoptic drivers + physics‑informed training
+
+v2 attacks the fundamental limitation of any surface‑only emulator: it cannot see the
+dynamics. Three upgrades, all in `models/train.py` / `models/architecture.py`:
+
+1. **Driver channels** — 7 history days × 4 synoptic anomalies (MSLP, u850, v850, precipitable
+   water) join the input (51 → **79** channels). The network now *sees* the pressure field whose
+   gradient drives the wind that advects the moisture that becomes rain.
+2. **Physics‑informed loss (PINN‑style soft constraints)** — inside the loss, predictions are
+   reconstructed to **real units** (`anomaly·σ + climatology(doy)`) and penalised for violating
+   first‑order laws: **mass non‑negativity** (implied negative rainfall) and **thermodynamic
+   ordering** (tmin > tmax). The data term dominates; the physics terms act as law‑abiding
+   regularisers, and the same laws are enforced + audited at inference.
+3. **Ablation by construction** — the pipeline trains three comparable models so the driver
+   contribution is *measured*, not asserted: **v1** (shipped baseline), **v2a** (same 38‑year
+   data, no drivers) and **v2** (drivers + physics loss). `evaluation/evaluate.py <ckpt>` writes
+   `eval_metrics_v2*.json` for a side‑by‑side.
+
+Checkpoint auto‑selection: the app and evaluation prefer `climate_unet_v2.pt` when present
+(override with the `VARUNA_CKPT` env var) — every call signature is unchanged from v1.
 
 ---
 
@@ -295,6 +349,8 @@ and the concrete design choice in VARUNA that defuses each one.
 | **Area distortion of a lat/lon grid** | Equal‑pixel loss over‑weights the far north. | **Latitude‑area‑weighted, land‑masked** loss — every km² counts equally, oceans ignored. |
 | **Small‑GPU memory** | 6 GB can't hold large climate transformers. | A compact **7.4 M‑param** residual U‑Net + **mixed‑precision (AMP)** — trains comfortably on an RTX 4050. |
 | **Data leakage** | Climatology/normalisation computed over all years inflates scores. | Climatology and σ use **training years only (1981–2018)**; test years 2021–2024 are fully unseen. |
+| **Surface‑only blindness** | Rain/temp history alone cannot anticipate a Bay‑of‑Bengal depression — no pressure, wind or moisture information. | **v2 driver channels** — MSLP, 850‑hPa winds and precipitable‑water anomalies feed the network the synoptic dynamics. |
+| **Un‑physical predictions** | Pure statistics can emit negative rain or tmin > tmax. | **Physics‑informed penalties** in the loss + hard enforcement and a live physics audit at inference. |
 
 > The net effect: a model that is **stable by design**, **honest by construction**, and **beats the
 > operational persistence baseline at every lead day** — on four years it never saw.
@@ -337,6 +393,10 @@ A second, complementary paradigm for **station‑level precision**, ensembled wi
 Evaluated on the **held‑out test years 2021–2024** (1,452 daily forecasts the model never saw),
 land‑masked and **latitude‑area‑weighted**, in **real‑world units**. Metrics follow operational NWP
 practice: **RMSE, MAE, Anomaly Correlation Coefficient (ACC)**, and **skill vs reference baselines**.
+
+> The tables below are the **v1** results (`outputs/eval_metrics.json`). The v2 pipeline
+> re‑evaluates every checkpoint with the same harness — plus **categorical extreme‑event
+> scores** — into `outputs/eval_metrics_v2*.json` for the v1 / v2a / v2 ablation comparison.
 
 ### Headline — day‑1 accuracy
 
@@ -382,6 +442,22 @@ and climatology. Full machine‑readable results in `outputs/eval_metrics.json`;
 - **Skill %** — improvement over a reference forecast: `100 × (1 − error_model / error_reference)`. Positive means VARUNA beats the baseline.
 - **Persistence** = "tomorrow looks like today." **Persistence‑of‑anomaly (POA)** = "today's departure from normal persists" — a genuinely strong meteorological baseline that VARUNA still beats on temperature.
 
+### Extreme‑event categorical verification (v2 harness)
+
+Field RMSE is not how warnings are judged — detection is. The evaluation now builds
+**area‑weighted contingency tables** for the two hazards the PS calls out and reports the
+operational categorical scores, per lead day, for AI vs POA vs persistence:
+
+| Event | Definition | Scores |
+|---|---|---|
+| 🔥 Heatwave | IMD departure criteria (Tmax ≥ 37 °C ∧ departure ≥ 4.5 °C) | **POD · FAR · CSI · ETS** |
+| 🌧️ Heavy rain | IMD daily class (≥ 64.5 mm) | **POD · FAR · CSI · ETS** |
+
+POD = probability of detection, FAR = false‑alarm ratio, CSI = critical success index,
+**ETS = equitable threat score** (skill relative to random hits — the standard headline score for
+rare events). Counts are accumulated across all test windows and *then* converted to scores
+(never averaged per‑window). Shown live in the **Validation & Skill** view.
+
 ---
 
 ## Digital‑Twin Assimilation
@@ -397,6 +473,12 @@ x_a = x_b + K (y − x_b),   K spreads the innovation per a spatially correlated
 With observations on the model grid this reduces to a covariance‑weighted, spatially‑smoothed
 innovation. The dashboard shows **RMSE‑to‑observation before vs after** assimilation, demonstrating
 the twin staying anchored to reality (`twin/assimilate.py`).
+
+**Cyclic assimilation — the loop, closed on screen.** The OI panel's **"🔁 Close the loop"**
+button runs the next forecast cycle twice: once initialised from the raw model background
+(forecast‑only cycle) and once from the **OI analysis** (assimilated cycle), then verifies both
+against the next day's observation. The assimilated cycle tracks tomorrow's truth closer — the
+*observe → forecast → assimilate → forecast* cycle is demonstrated, not just diagrammed.
 
 **The living‑twin cycle** — observe → forecast → assimilate → repeat:
 
@@ -483,10 +565,11 @@ boundaries, smooth slider interaction (heavy panels isolated with `st.fragment`)
 
 | View | What it shows |
 |---|---|
-| 🌍 **Climate Twin** | National/pilot AI forecast map · live state · OI assimilation panel |
+| 🌍 **Climate Twin** | National/pilot AI forecast map · live state · OI assimilation panel + **🔁 cyclic "close the loop"** · **🎲 ensemble‑spread uncertainty map** · **🧪 live physics audit** |
 | 🌡️ **Hazards & Extremes** | Heatwave severity · heavy‑rain category · dry‑spell length |
-| 🧪 **What‑if Simulator** | Scenario sliders → live Heat‑stress / AQI / Cooling maps + impact metrics |
-| 📈 **Validation & Skill** | Per‑variable RMSE/ACC/skill, skill curves, XGBoost validation panel, city forecast (observed → ClimateUNet → skill‑weighted CNN+XGB ensemble) |
+| 🧪 **What‑if Simulator** | Scenario sliders → live Heat‑stress / AQI / Cooling maps + impact metrics (temperature lever CC‑coupled to rainfall) |
+| 📥 **Your Data → Forecast** | **BYOO** — type/upload your recent observations → OI assimilation → re‑forecast (2/3/7/10‑day horizon), Δ‑impact map, innovation report |
+| 📈 **Validation & Skill** | Per‑variable RMSE/ACC/skill, skill curves, **extreme‑event POD/FAR/ETS panel**, XGBoost validation panel, city forecast (observed → ClimateUNet → skill‑weighted CNN+XGB ensemble) |
 | 🛰️ **Satellite (INSAT)** | Real INSAT‑3DR LST layer + satellite‑vs‑model cross‑check |
 | ℹ️ **About** | Methods & honest framing |
 
@@ -523,10 +606,12 @@ A typical two‑minute session — every step is driven by the live model, nothi
 1. **Pick a moment.** Choose a date (say *15 May 2024*) and a region (national or the South‑India pilot). VARUNA reconstructs that day's real climate state from IMD data.
 2. **Read the forecast.** The Climate‑Twin map shows the 10‑day AI outlook; slide the **lead‑day** control (1→10) and the field redraws instantly, with a region‑mean‑vs‑climatology evolution chart beside it.
 3. **Spot the hazards.** Flip to **Hazards & Extremes** — heatwave departure, heavy‑rain category and dry‑spell length are computed straight from the forecast.
-4. **Assimilate reality.** Open the **OI panel** to fuse observations into the state and watch RMSE‑to‑observation drop.
-5. **Ask "what if?"** In the **simulator**, push *+2 °C*, drier monsoon, more greening or cool roofs — the **heat‑stress** and **AQI** maps and their headline metrics update live.
-6. **Check the receipts.** **Validation & Skill** shows RMSE / ACC / skill on unseen years and the city forecast (observed → ClimateUNet → CNN+XGB ensemble).
-7. **Cross‑check from orbit.** **Satellite (INSAT)** overlays the real INSAT‑3DR LST and compares skin vs air temperature.
+4. **Assimilate reality.** Open the **OI panel** to fuse observations into the state and watch RMSE‑to‑observation drop — then press **🔁 Close the loop** to see the analysis initialise the *next* forecast cycle and beat the forecast‑only cycle.
+5. **See the uncertainty.** Toggle **🎲 ensemble spread** for the per‑cell confidence map, and open **🧪 Physics checks** to audit the forecast against first‑order laws.
+6. **Ask "what if?"** In the **simulator**, push *+2 °C*, drier monsoon, more greening or cool roofs — the **heat‑stress** and **AQI** maps and their headline metrics update live (warming scales rainfall by Clausius–Clapeyron).
+7. **Bring your own data.** In **📥 Your Data → Forecast**, type yesterday's weather at your city — the twin assimilates it and shows how the forecast shifts, with the innovation footprint on the map.
+8. **Check the receipts.** **Validation & Skill** shows RMSE / ACC / skill on unseen years, **extreme‑event POD/FAR/ETS**, and the city forecast (observed → ClimateUNet → CNN+XGB ensemble).
+9. **Cross‑check from orbit.** **Satellite (INSAT)** overlays the real INSAT‑3DR LST and compares skin vs air temperature.
 
 ---
 
@@ -534,7 +619,7 @@ A typical two‑minute session — every step is driven by the live model, nothi
 
 | Layer | Tools |
 |---|---|
-| Data | `imdlib`, `xarray`, `netCDF4`, `h5py`, `bottleneck`, NumPy/Pandas |
+| Data | `imdlib`, `xarray`, `netCDF4`, `h5py`, `bottleneck`, NumPy/Pandas · NOAA PSL NetcdfSubset (drivers) |
 | Deep learning | **PyTorch 2.5 + CUDA 12.1** (AMP) |
 | Classical ML | **XGBoost 2.0** (GPU hist), scikit‑learn |
 | Visualisation | **Streamlit 1.56**, **Plotly**, Matplotlib, Altair |
@@ -551,25 +636,28 @@ VARUNA/
 ├── data/
 │   ├── download_imd.py        # IMD ingest via imdlib
 │   ├── prepare.py             # regrid · climatology · anomalies · cache
+│   ├── drivers.py             # v2: synoptic drivers (MSLP·u850·v850·PWAT) ingest + cube
 │   ├── climatology.py         # smoothed day-of-year climatology
 │   ├── proxies.py             # urban-fraction & baseline PM2.5 fields
 │   └── insat.py               # INSAT-3DR L2B HDF5 ingest + regrid
 ├── models/
-│   ├── architecture.py        # ClimateUNet (residual U-Net + SE attention)
-│   ├── dataset.py             # anomaly cube + supervised windows + POA prior
-│   ├── train.py               # GPU training loop (AMP, cosine, early stop)
-│   ├── forecast.py            # inference → real-unit fields
+│   ├── architecture.py        # ClimateUNet (residual U-Net + SE attention, v2 drivers)
+│   ├── dataset.py             # anomaly cube + supervised windows + POA prior + drivers
+│   ├── train.py               # GPU training loop (AMP, cosine, physics-informed losses)
+│   ├── forecast.py            # inference → real-unit fields · window/ensemble predicts
 │   ├── baseline.py            # persistence / POA / climatology references
 │   └── xgb_forecast.py        # XGBoost station model + city ensemble
 ├── analytics/
-│   └── extremes.py            # heatwave · rain category · dry-spell
+│   ├── extremes.py            # heatwave · rain category · dry-spell
+│   └── physics.py             # live physics audit + Clausius–Clapeyron factor
 ├── evaluation/
-│   ├── metrics.py             # RMSE/MAE/ACC/skill (weighted, masked)
-│   └── evaluate.py            # full benchmark vs baselines
+│   ├── metrics.py             # RMSE/MAE/ACC/skill + POD/FAR/CSI/ETS (weighted, masked)
+│   └── evaluate.py            # full benchmark vs baselines + event contingency tables
 ├── scenario/
-│   └── engine.py              # heat index · CPCB AQI · LST/UHI proxy
+│   └── engine.py              # heat index · CPCB AQI · LST/UHI proxy · CC coupling
 ├── twin/
-│   └── assimilate.py          # Optimal Interpolation + nudging
+│   ├── assimilate.py          # Optimal Interpolation + nudging
+│   └── user_obs.py            # BYOO: user observations → OI assimilation → forecast
 ├── viz/
 │   ├── theme.py               # dark colormaps + CSS
 │   └── maps.py                # Plotly field maps + India boundaries
@@ -595,10 +683,15 @@ pip install -r requirements.txt                         # install torch CUDA bui
 
 # 2. data → model → metrics → dashboard  (everything runs locally)
 python data/prepare.py            # download REAL IMD 1981–2024 + build cache
-python models/train.py            # train ClimateUNet on the GPU
+python data/drivers.py            # v2: fetch + build synoptic driver cube (open, no login)
+python models/train.py            # train ClimateUNet (v2 auto-detects the drivers)
 python models/xgb_forecast.py     # train the XGBoost companion
-python evaluation/evaluate.py     # benchmark on unseen 2021–2024
-streamlit run app.py              # launch VARUNA
+python evaluation/evaluate.py     # benchmark on unseen 2021–2024 (+ event scores)
+streamlit run app.py              # launch VARUNA (auto-selects the v2 checkpoint)
+
+# optional: driver ablation — same data, no drivers → climate_unet_v2a.pt
+VARUNA_NO_DRIVERS=1 VARUNA_TAG=v2a python models/train.py
+python evaluation/evaluate.py models/checkpoints/climate_unet_v2a.pt
 
 # optional: drop INSAT .h5 files into data/insat/ to light up the satellite layer
 ```
@@ -657,8 +750,19 @@ We state our boundaries plainly — credibility matters in front of ISRO scienti
 - **AI short‑range forecast**, not a full general‑circulation model (GCM). Skill is strong at days 1–3 and decays with lead time, as expected.
 - **Rainfall is intrinsically hard** day‑to‑day (ACC ≈ 0.40) — a physical limit even operational centres face; temperature is where the model excels (ACC 0.76).
 - **Heat / AQI / LST are physics‑informed proxies** (NWS heat index, CPCB AQI, surface‑energy LST), clearly labelled — coefficients are literature‑consistent.
-- **Assimilation = Optimal Interpolation**, not full 4D‑Var/EnKF.
-- **Uncertainty** is represented by a **CNN + XGBoost ensemble vs three baselines**, not a multi‑GCM ensemble.
+- **Assimilation = Optimal Interpolation**, not full 4D‑Var/EnKF — but it now runs **cyclically**
+  (the analysis initialises the next forecast) and ingests **user observations** (BYOO).
+- **Uncertainty** is represented by a **perturbed initial‑condition + MC‑dropout ensemble**
+  (NEPS/GEFS design logic) plus the **CNN + XGBoost** multi‑model disagreement — not a
+  multi‑GCM ensemble. Note the anomaly spread *decays* with lead as members relax toward
+  climatology together; total uncertainty = spread + climatological variance.
+- **Drivers are NCEP/NCAR reanalysis** (global, open, 1948→present) rather than IMDAA — chosen so
+  the pipeline is reproducible end‑to‑end without credentials and covers the 2021–2024 test years
+  (IMDAA's open BharatBench release ends 2020). The ingest is source‑agnostic; IMDAA is the
+  drop‑in national upgrade once NCMRWF RDS access is granted.
+- **Physics** enters as (i) driver fields, (ii) PINN‑style soft constraints in the loss, and
+  (iii) enforced + audited laws at inference — not as a full dynamical core (that is the
+  hybrid‑propagator roadmap step).
 - **Future years (2025–26)** are **climatological projections + scenarios**, explicitly badged — never presented as literal multi‑year weather forecasts.
 - **Satellite data** is used as a real observation / validation layer, not (yet) a training predictor.
 
@@ -668,10 +772,24 @@ We state our boundaries plainly — credibility matters in front of ISRO scienti
 
 ## Scale‑up Roadmap
 
+**Shipped since v1** ✅ — synoptic driver channels (pressure/winds/moisture) · physics‑informed
+training losses · live physics audit · perturbed‑ensemble uncertainty · BYOO user‑data
+assimilation · cyclic OI (analysis → next forecast) · categorical extreme‑event verification
+(POD/FAR/CSI/ETS) · Clausius–Clapeyron scenario coupling · driver ablation harness (v2 vs v2a).
+
+**Next:**
+- **National drivers:** swap NCEP R1 → **IMDAA** (NCMRWF RDS) and **INSAT Atmospheric Motion
+  Vector winds** (MOSDAC) in the same ingest.
+- **Hybrid dynamical core:** replace the exponential POA prior with an advection–diffusion
+  propagator driven by the wind channels; the network learns only the residual (NeuralGCM/ACE class).
+- **Physics‑informed losses, level 2:** advection‑consistency and moisture‑budget penalties using
+  the driver fields.
 - **Foundation models:** fine‑tune **IBM‑NASA Prithvi‑WxC** / adapt **Pangu‑Weather** on **IMDAA / BharatBench** reanalysis for true medium‑range skill.
 - **Real assimilation:** ensemble Kalman filter / 4D‑Var with live INSAT + AWS feeds.
 - **More variables & satellites:** INSAT IMC rainfall, SST, OLR, AOD; Oceansat; Bhuvan/NICES layers.
 - **Operational delivery:** React + deck.gl front‑end, tiled national serving, scheduled ingest.
+- **BYOO vision layer:** OCR a photographed weather table / screenshot into the same
+  observation‑assimilation pipeline.
 
 ---
 
@@ -680,12 +798,12 @@ We state our boundaries plainly — credibility matters in front of ISRO scienti
 | Parameter | Evidence in VARUNA |
 |---|---|
 | Problem Understanding & Clarity | This README · `PLAN.md` · honest framing |
-| Data Usage & Pre‑processing | Real IMD 1981–2024 + INSAT‑3DR · regrid · climatology · anomalies · no leakage |
-| Model Development & Technical Approach | ClimateUNet (residual, attention, multi‑horizon) + XGBoost ensemble |
-| Prediction Performance & Validation | RMSE/MAE/ACC/skill on unseen years · `evaluation/evaluate.py` |
-| Digital‑Twin Concept | Forecast + Optimal‑Interpolation assimilation + satellite fusion |
-| Visualization & UI | Six‑view Plotly dashboard, instant maps, hazards, what‑if |
-| Innovation & Creativity | Hazard early‑warning · connected heat/AQI · ensemble · future‑climate scenarios |
+| Data Usage & Pre‑processing | Real IMD 1981–2024 + INSAT‑3DR + synoptic drivers · regrid · climatology · anomalies · no leakage |
+| Model Development & Technical Approach | ClimateUNet v2 (residual, attention, multi‑horizon, drivers, physics‑informed loss) + XGBoost ensemble + ablation harness |
+| Prediction Performance & Validation | RMSE/MAE/ACC/skill **+ POD/FAR/CSI/ETS event detection** on unseen years · `evaluation/evaluate.py` |
+| Digital‑Twin Concept | Forecast + **cyclic** Optimal‑Interpolation assimilation + satellite fusion + **BYOO user observations** |
+| Visualization & UI | Seven‑view Plotly dashboard, instant maps, hazards, what‑if, uncertainty & physics panels |
+| Innovation & Creativity | Hazard early‑warning · connected heat/AQI · perturbed ensemble · BYOO assimilation · future‑climate scenarios |
 | Presentation & Communication | `DECK.md` (auto‑filled) · `DEMO.md` walkthrough |
 
 ---
@@ -722,6 +840,19 @@ A weather app *shows* a forecast. VARUNA is a **digital twin** — it reconstruc
 assimilates real observations back in, and lets you simulate interventions and see their downstream
 impact on heat and air quality.
 
+**Where is the physics in an AI model?**
+In layers. The climatology *is* the thermodynamic seasonal cycle; the POA prior is the Hasselmann
+stochastic climate model; v2 adds the **dynamics** as driver inputs (pressure, winds, moisture) and
+**physics‑informed penalties** in the loss; and every forecast is audited live against mass
+non‑negativity, thermodynamic ordering (tmax ≥ tmin) and a bounded water budget. The what‑if
+engine couples its levers through the **Clausius–Clapeyron** law (~7 %/°C).
+
+**Can I feed it my own weather data?**
+Yes — the **📥 Your Data → Forecast** view. Your values are treated as observations with an error
+σₒ, assimilated by Optimal Interpolation around your location, and the corrected state re‑runs
+ClimateUNet for a 2/3/7/10‑day forecast — even for dates beyond the IMD archive, where your data
+supplies the only weather signal. Physically impossible entries are rejected, never ingested.
+
 ---
 
 ## Glossary
@@ -740,6 +871,13 @@ impact on heat and air quality.
 | **Regrid** | Interpolating one grid (1° temperature) onto another (0.25° rainfall) for a common national grid. |
 | **AMP** | Automatic Mixed Precision — float16/32 training that saves GPU memory and time. |
 | **SE attention** | Squeeze‑and‑Excite — lightweight channel attention that reweights feature maps. |
+| **MSLP** | Mean sea‑level pressure — its gradients drive the synoptic flow (v2 driver). |
+| **PWAT** | Precipitable water — total‑column moisture available for rainfall (v2 driver). |
+| **BYOO** | Bring‑Your‑Own‑Observations — user data assimilated into the twin via OI. |
+| **PINN** | Physics‑informed neural network — physical laws as soft penalties in the training loss. |
+| **POD / FAR** | Probability of detection / false‑alarm ratio — categorical warning verification. |
+| **CSI / ETS** | Critical success index / equitable threat score — event‑detection skill (ETS corrects for random hits). |
+| **Clausius–Clapeyron** | ~7 %/°C growth of the atmosphere's moisture‑holding capacity — couples the ΔT lever to rainfall. |
 
 ---
 
