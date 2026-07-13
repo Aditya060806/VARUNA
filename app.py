@@ -156,6 +156,16 @@ def forecast_for_date(date_iso):
     return frames, [str(d) for d in fdates], "clim"
 
 
+@st.cache_data(show_spinner="Sampling MC-dropout ensemble…")
+def ensemble_for_date(date_iso, n=6):
+    """MC-dropout ensemble spread for an AI-forecastable date."""
+    pts = pd.Timestamp(date_iso)
+    ti = int(np.argmin(np.abs(dates.values - np.datetime64(pts))))
+    ti = min(max(ti, t_lo), len(dates) - 1)
+    res = fc.predict_ensemble(cube, ti, carr, std, dates, n=n)
+    return {"spread": res["spread"], "physics": res["physics"], "members": res["members"]}
+
+
 frames, f_dates, fmode = forecast_for_date(picked.isoformat())
 
 # nearest real-data index (for panels that compare against observations / history)
@@ -173,7 +183,8 @@ def clim_field(var, day_idx):
 
 
 VIEWS = ["🌍 Climate Twin", "🌡️ Hazards & Extremes", "🧪 What-if Simulator",
-         "📈 Validation & Skill", "🛰️ Satellite (INSAT)", "ℹ️ About"]
+         "📥 Your Data → Forecast", "📈 Validation & Skill", "🛰️ Satellite (INSAT)",
+         "ℹ️ About"]
 view = st.radio("View", VIEWS, horizontal=True, label_visibility="collapsed")
 
 
@@ -213,6 +224,53 @@ if view == VIEWS[0]:
             st.metric("RMSE to obs · before", f"{before['rmse']:.2f} {unit}")
             st.metric("RMSE to obs · after OI", f"{after['rmse']:.2f} {unit}",
                       f"{after['rmse']-before['rmse']:+.2f}", delta_color="inverse")
+
+    # --- forecast uncertainty (MC-dropout ensemble) + physics audit ---
+    if fmode == "ai":
+        uc1, uc2 = st.columns([3, 1.1])
+        with uc1:
+            show_unc = st.checkbox("🎲 Show forecast uncertainty (MC-dropout ensemble)")
+            if show_unc:
+                ens = ensemble_for_date(picked.isoformat())
+                sp, _, _ = regional(ens["spread"][base_var][lead - 1])
+                ufig = maps.field_figure(
+                    sp, rlat, rlon, "cooling", landmask=rmask, bounds=bounds,
+                    vmin=0, vmax=float(np.nanmax(sp[rmask])) if rmask.any() else 1,
+                    unit=("mm/day" if base_var == "rain" else "°C"),
+                    title=f"Ensemble spread ({ens['members']} members) — "
+                          f"{theme.LABELS[base_var]}, day {lead}", height=420)
+                st.plotly_chart(ufig, use_container_width=True, key="unc")
+                st.caption("Per-cell std-dev across stochastic forward passes — where "
+                           "the twin is confident (dark) vs uncertain (bright). "
+                           "Second uncertainty source: CNN-vs-XGBoost disagreement "
+                           "in the city ensemble (Validation view).")
+        with uc2:
+            if show_unc:
+                spl = ens["spread"][base_var][lead - 1][landmask]
+                unit3 = "mm/day" if base_var == "rain" else "°C"
+                st.markdown("#### Uncertainty")
+                st.metric("Mean spread", f"{np.nanmean(spl):.2f} {unit3}")
+                st.metric("Max spread", f"{np.nanmax(spl):.2f} {unit3}")
+
+    with st.expander("🧪 Physics checks — live audit of this forecast"):
+        from analytics import physics as _phys
+        _cseq = {v: np.stack([clim_field(v, k) for k in range(C.HORIZON)])
+                 for v in ("tmax", "tmin", "rain")}
+        _rep = _phys.consistency_report(frames, landmask, _cseq["tmax"],
+                                        _cseq["tmin"], _cseq["rain"])
+        p1, p2, p3, p4 = st.columns(4)
+        p1.metric("tmax ≥ tmin", f"{100 - _rep['dtr_violation_pct']:.1f}% cells",
+                  "thermodynamic ordering", delta_color="off")
+        p2.metric("Rain ≥ 0", f"{100 - _rep['neg_rain_pct']:.1f}% cells",
+                  "mass non-negativity", delta_color="off")
+        p3.metric("10-day water budget", f"{_rep.get('rain_budget_departure_pct', 0):+.1f}%",
+                  "vs climatological budget", delta_color="off")
+        p4.metric("Diurnal range", f"{_rep['dtr_mean_c']:.1f} °C",
+                  f"{_rep.get('dtr_departure_c', 0):+.1f} vs normal", delta_color="off")
+        st.caption("The AI core is audited against first-order physical laws on every "
+                   "forecast: temperature ordering, non-negative water, a bounded "
+                   "national water budget, and an energy-balance-consistent diurnal "
+                   "range. Constraints are enforced at reconstruction and reported here.")
 
     # 10-day forecast evolution vs climatology (region-mean over land)
     st.markdown("#### 📈 10-day forecast evolution — region mean")
@@ -353,8 +411,138 @@ elif view == VIEWS[2]:
     whatif_panel()
 
 
-# ===== Validation & skill ==================================================
+# ===== Your data -> forecast (BYOO) ========================================
 elif view == VIEWS[3]:
+    from twin import user_obs
+    from analytics import physics as phys
+
+    st.markdown("### 📥 Bring your own observations → AI forecast")
+    st.caption("Attach the last days of weather at your location — the twin treats "
+               "them as **observations**, assimilates them into the national state via "
+               "Optimal Interpolation, and re-runs ClimateUNet. Works beyond the IMD "
+               "archive too: there the background falls back to climatology and *your* "
+               "data supplies the weather signal — how an operational analysis handles "
+               "a data-sparse day.")
+
+    c1, c2, c3 = st.columns([1.3, 1, 1])
+    with c1:
+        loc_mode = st.radio("Location", ["City", "Custom lat/lon"], horizontal=True)
+        if loc_mode == "City":
+            city_b = st.selectbox("City", list(C.CITIES.keys()), key="byoo_city")
+            b_lat, b_lon = C.CITIES[city_b]
+        else:
+            b_lat = st.number_input("Latitude °N", 6.5, 38.5, 19.08, 0.01)
+            b_lon = st.number_input("Longitude °E", 66.5, 100.0, 72.88, 0.01)
+    with c2:
+        start_pick = st.date_input("Forecast start (day after your last observation)",
+                                   value=_last_d + _dt.timedelta(days=1),
+                                   min_value=_min_d, max_value=_max_d, key="byoo_date")
+        horizon = st.select_slider("Forecast horizon (days)", options=[2, 3, 7, 10],
+                                   value=7)
+    with c3:
+        sigma_o = st.slider("Observation error σₒ (lower = trust your data more)",
+                            0.1, 1.5, 0.5, 0.1)
+        Lb = st.slider("Station influence radius (grid cells)", 0.5, 5.0, 2.0, 0.5)
+
+    start_ts = pd.Timestamp(start_pick)
+    iy_b, ix_b = user_obs.nearest_cell(b_lat, b_lon, grid)
+
+    st.download_button("📄 Download CSV template", user_obs.TEMPLATE_CSV,
+                       "varuna_obs_template.csv", "text/csv")
+    up = st.file_uploader("Upload observations CSV (date, rain, tmax, tmin)",
+                          type=["csv"])
+
+    # editable table prefilled with the twin's own background at that cell
+    pre_rows = []
+    for k in range(C.INPUT_DAYS):
+        d = start_ts - pd.Timedelta(days=C.INPUT_DAYS - k)
+        doy = min(int(d.dayofyear), 365)
+        if dates[0] <= d <= dates[-1]:
+            ti_ = int(np.argmin(np.abs(dates.values - np.datetime64(d))))
+            vals = {v: round(float(obs[v].values[ti_, iy_b, ix_b]), 1) for v in C.VARIABLES}
+        else:
+            vals = {v: round(float(carr[v][doy - 1, iy_b, ix_b]), 1) for v in C.VARIABLES}
+        pre_rows.append({"date": str(d.date()), **vals})
+    st.caption("Edit the table (pre-filled with the twin's background — IMD where "
+               "available, climatology beyond the archive) or upload your CSV:")
+    edited = st.data_editor(pd.DataFrame(pre_rows), use_container_width=True,
+                            num_rows="fixed", key="byoo_editor")
+
+    if st.button("🔮 Assimilate my data & forecast", type="primary"):
+        try:
+            user_df = (user_obs.parse_csv(up.getvalue()) if up is not None
+                       else user_obs.parse_csv(edited.to_csv(index=False)))
+        except Exception as e:
+            st.error(f"Could not read observations: {e}")
+            st.stop()
+
+        hist0, n_real = user_obs.build_history(cube, dates, start_ts)
+        base = fc.predict_window(hist0, start_ts, carr, std)
+        hist1, innov_report = user_obs.inject_observations(
+            hist0.copy(), start_ts, user_df, carr, std, iy_b, ix_b,
+            length_scale=Lb, sigma_o=sigma_o)
+        mine = fc.predict_window(hist1, start_ts, carr, std)
+
+        if not innov_report:
+            st.warning("No observation fell inside the 7-day input window before the "
+                       "forecast start — check the dates in your data.")
+        lcb, rcb = st.columns([3, 1.1])
+        unit_b = "mm/day" if base_var == "rain" else "°C"
+        with lcb:
+            # city-point chart: your obs -> twin baseline vs twin + your data
+            fdd = [start_ts + pd.Timedelta(days=k) for k in range(horizon)]
+            rows_b = {"date": [], theme.LABELS[base_var]: [], "series": []}
+            for _, r in user_df.iterrows():
+                if base_var in user_df.columns and np.isfinite(r.get(base_var, np.nan)):
+                    rows_b["date"].append(pd.Timestamp(r["date"]))
+                    rows_b[theme.LABELS[base_var]].append(float(r[base_var]))
+                    rows_b["series"].append("your observations")
+            for k in range(horizon):
+                rows_b["date"].append(fdd[k])
+                rows_b[theme.LABELS[base_var]].append(float(base["frames"][base_var][k, iy_b, ix_b]))
+                rows_b["series"].append("twin (archive only)")
+                rows_b["date"].append(fdd[k])
+                rows_b[theme.LABELS[base_var]].append(float(mine["frames"][base_var][k, iy_b, ix_b]))
+                rows_b["series"].append("twin + your data")
+            import altair as alt
+            st.altair_chart(alt.Chart(pd.DataFrame(rows_b)).mark_line(point=True).encode(
+                x="date:T", y=alt.Y(f"{theme.LABELS[base_var]}:Q"),
+                color=alt.Color("series:N",
+                                scale=alt.Scale(range=["#A7F3D0", "#8b97c6", "#FF7B00"]))),
+                use_container_width=True)
+
+            # where the user's data changed the national day-1 field
+            delta = mine["frames"][base_var][0] - base["frames"][base_var][0]
+            dfld, drlat, drlon = maps.crop_to_bounds(delta, lats, lons, bounds)
+            dmask, _, _ = maps.crop_to_bounds(landmask, lats, lons, bounds)
+            dmax = float(np.nanmax(np.abs(dfld[dmask]))) if dmask.any() else 1.0
+            dfig = maps.field_figure(dfld, drlat, drlon, "cooling", landmask=dmask,
+                                     bounds=bounds, vmin=-max(dmax, 1e-3),
+                                     vmax=max(dmax, 1e-3), unit=unit_b, height=420,
+                                     title="Impact of your observations — Δ day-1 forecast")
+            st.plotly_chart(dfig, use_container_width=True, key="byoo_delta")
+            st.caption("The innovation spreads from your station per the correlated "
+                       "background-error covariance — one observation informs its "
+                       "neighbourhood, the defining behaviour of Optimal Interpolation.")
+        with rcb:
+            st.markdown("#### Assimilation report")
+            st.metric("Observations used", f"{len(innov_report)} day(s)")
+            st.metric("Real-archive days in window", f"{n_real}/{C.INPUT_DAYS}")
+            d1 = float(mine["frames"][base_var][0, iy_b, ix_b]
+                       - base["frames"][base_var][0, iy_b, ix_b])
+            st.metric("Δ day-1 at your location", f"{d1:+.2f} {unit_b}")
+            thr = 0.5 if base_var == "rain" else 0.05
+            st.metric("Area influenced", f"{user_obs.influence_area_pct(delta, landmask, thr):.1f}% of land")
+            rep_b = phys.consistency_report(mine["frames"], landmask)
+            st.metric("Physics: tmax ≥ tmin", f"{100 - rep_b['dtr_violation_pct']:.0f}% cells")
+            if innov_report:
+                st.markdown("**Innovations (obs − background):**")
+                st.dataframe(pd.DataFrame(innov_report), use_container_width=True,
+                             height=180)
+
+
+# ===== Validation & skill ==================================================
+elif view == VIEWS[4]:
     st.markdown("### AI model skill on unseen test years (2021–2024)")
     if EVAL is None:
         st.warning("Run `python evaluation/evaluate.py` to generate skill metrics.")
@@ -453,7 +641,7 @@ elif view == VIEWS[3]:
 
 
 # ===== Satellite (INSAT) ===================================================
-elif view == VIEWS[4]:
+elif view == VIEWS[5]:
     st.markdown("### INSAT / MOSDAC satellite layer — real Indian satellite data")
     if not insat.has_data():
         st.info(insat.instructions())

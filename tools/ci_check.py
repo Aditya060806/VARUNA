@@ -48,9 +48,9 @@ def compile_all():
 
 def import_pure_modules():
     import config  # noqa: F401
-    from analytics import extremes  # noqa: F401
+    from analytics import extremes, physics  # noqa: F401
     from scenario import engine  # noqa: F401
-    from twin import assimilate  # noqa: F401
+    from twin import assimilate, user_obs  # noqa: F401
     from evaluation import metrics  # noqa: F401
     from data import proxies  # noqa: F401
     from data import insat  # noqa: F401
@@ -95,6 +95,42 @@ def check_assimilate():
     assert after <= before + 1e-9, "OI increased RMSE to obs"
 
 
+def check_user_obs():
+    import pandas as pd
+    import config as Cc
+    from twin import user_obs
+    df = user_obs.parse_csv(user_obs.TEMPLATE_CSV)
+    assert len(df) == 3 and "rain" in df.columns, "template CSV parse failed"
+    # one observation into a zero background -> OI gain + spatial decay
+    H = W = 9
+    hist = np.zeros((Cc.INPUT_DAYS, H, W, 3), dtype="float32")
+    carr = {v: np.zeros((366, H, W), dtype="float32") for v in Cc.VARIABLES}
+    std = np.ones(3, dtype="float32")
+    user = pd.DataFrame([{"date": "2024-06-10", "rain": 10.0}])
+    out, rep = user_obs.inject_observations(hist, "2024-06-11", user, carr, std,
+                                            4, 4, length_scale=1.5, sigma_o=0.5)
+    assert len(rep) == 1, "innovation report missing"
+    cell = out[Cc.INPUT_DAYS - 1, 4, 4, 0]
+    assert 0 < cell < 10.0, "OI gain must move toward obs without overshooting"
+    assert out[Cc.INPUT_DAYS - 1, 4, 5, 0] < cell, "influence must decay with distance"
+    # physically impossible values must be rejected, not ingested
+    bad = user_obs.parse_csv("date,rain,tmax,tmin\n2024-06-10,-5,20,25\n")
+    assert bad["rain"].isna().all() and bad["tmax"].isna().all(), \
+        "invalid values must be masked (negative rain / tmin>tmax)"
+
+
+def check_physics():
+    from analytics import physics
+    frames = {"tmax": np.full((3, 5, 5), 30.0), "tmin": np.full((3, 5, 5), 22.0),
+              "rain": np.full((3, 5, 5), 4.0)}
+    frames["tmin"] = frames["tmin"].copy(); frames["tmin"][0, 0, 0] = 31.0
+    rep = physics.consistency_report(frames, np.ones((5, 5), bool))
+    assert rep["dtr_violation_pct"] > 0, "DTR violation not detected"
+    assert rep["neg_rain_pct"] == 0.0, "false negative-rain flag"
+    assert abs(physics.cc_moisture_factor(1.0) - 1.07) < 1e-9, "CC scaling wrong"
+    assert physics.cc_moisture_factor(-20.0) == 0.0, "CC factor must floor at 0"
+
+
 def check_insat_parser():
     from data import insat
     ts = insat.product_datetime("3RIMG_29JUN2026_0815_L2B_LST_V01R00.h5")
@@ -110,6 +146,8 @@ def main():
     gate("scenario engine", check_scenario)
     gate("extremes analytics", check_extremes)
     gate("assimilation (OI)", check_assimilate)
+    gate("user observations (BYOO)", check_user_obs)
+    gate("physics diagnostics", check_physics)
     gate("INSAT filename parser", check_insat_parser)
 
     if FAILURES:

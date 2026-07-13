@@ -419,6 +419,37 @@ sequenceDiagram
 
 ---
 
+## Bring Your Own Observations (BYOO)
+
+The twin accepts **user-supplied recent weather** — type the last days' values for any location
+(or upload a CSV) and VARUNA forecasts from *your* data (`twin/user_obs.py`, view
+**📥 Your Data → Forecast**):
+
+- Each value is treated as an **observation with error σₒ**, anomalised against the national
+  climatology and assimilated into the gridded history via the same **Optimal-Interpolation**
+  mathematics as the twin loop (Gaussian background-error covariance around your station).
+- The corrected state then initialises ClimateUNet for a **2/3/7/10-day** forecast; the dashboard
+  shows *twin-only vs twin+your-data*, the Δ-forecast impact map, and the innovation report.
+- Works **beyond the IMD archive**: the background falls back to climatology and your fresh
+  observations supply the weather signal — exactly how an operational analysis treats a
+  data-sparse day. Physically impossible entries (negative rain, tmin > tmax) are rejected.
+
+## Uncertainty & Physical Consistency
+
+- **Perturbed ensemble** (`Forecaster.predict_ensemble`): initial-condition perturbations within
+  analysis error (propagated through the POA prior, as in IMD **NEPS** / NCEP GEFS design) +
+  stochastic MC-dropout → per-cell forecast **spread maps** in the Climate Twin view. Second
+  uncertainty source: the CNN-vs-XGBoost multi-model disagreement.
+- **Physics audit** (`analytics/physics.py`): every forecast is checked live against first-order
+  laws — thermodynamic ordering (tmax ≥ tmin, enforced at reconstruction with the pre-fix
+  violation rate reported), mass non-negativity of rain, the 10-day **water budget** vs the
+  climatological budget, and the **diurnal temperature range** vs its climatological normal.
+- **Clausius–Clapeyron coupling** (`scenario/engine.py`): the what-if temperature lever scales the
+  rainfall regime at **~7 %/°C** (saturation-vapour-pressure law), keeping the scenario levers
+  thermodynamically linked.
+
+---
+
 ## Connected Applications
 
 One climate state → three connected, climate‑sensitive applications (`scenario/engine.py`, `analytics/extremes.py`):

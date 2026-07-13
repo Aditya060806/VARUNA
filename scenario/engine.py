@@ -7,6 +7,9 @@ Formulas are standard and citable:
   * AQI        : India CPCB PM2.5 sub-index breakpoints.
   * LST / UHI  : linear surface-energy proxy
                  LST = T + UHI*urban - k_ndvi*dNDVI - k_albedo*dAlbedo
+  * CC coupling: Clausius-Clapeyron — a warmer atmosphere holds ~7% more
+                 moisture per degC, so the temperature lever also scales the
+                 rainfall regime (thermodynamic consistency between levers).
 
 These are transparent proxies for the proof-of-concept; coefficients are
 literature-consistent and clearly labeled as proxies.
@@ -99,10 +102,16 @@ def aqi_proxy(pm_base, rain_mm, d_ndvi, wind, urban, d_temp=0.0):
     return pm25_to_aqi(np.clip(pm, 0, 1000))
 
 
+CC_RATE = 0.07  # Clausius-Clapeyron: ~7%/degC moisture-holding capacity
+
+
 def run_scenario(temp_field, rain_field, urban, pm_base, ctrl: Controls):
     urban = np.asarray(urban, dtype="float64")
     t = np.asarray(temp_field, dtype="float64") + ctrl.d_temp
     rain = np.clip(np.asarray(rain_field, dtype="float64") * (1 + ctrl.d_rain_pct / 100.0), 0, None)
+    # Clausius-Clapeyron coupling: warming scales the rainfall regime ~7%/degC
+    # (saturation vapour pressure), so the levers stay thermodynamically linked.
+    rain = rain * max(1.0 + CC_RATE * ctrl.d_temp, 0.0)
     urb = np.clip(urban + ctrl.urbanization, 0, 1)
 
     eff_ndvi = ctrl.greening * urb        # interventions deployed in built-up areas
